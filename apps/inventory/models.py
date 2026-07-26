@@ -5,6 +5,7 @@
 #   * Make sure each ForeignKey and OneToOneField has `on_delete` set to the desired behavior
 #   * Remove `managed = False` lines if you wish to allow Django to create, modify, and delete the table
 # Feel free to rename the models, but don't rename db_table values or field names.
+from django.conf import settings
 from django.db import models
 
 
@@ -175,12 +176,24 @@ class EquipmentList(models.Model):
 
 
 class InventoryTransactions(models.Model):
+    class TransactionType(models.TextChoices):
+        RECEIVE_FROM_SUPPLIER = 'Receive From Supplier', 'Receive From Supplier'
+        ISSUE = 'Issue', 'Issue'
+        RETURN_TO_SUPPLIER = 'Return to Supplier', 'Return to Supplier'
+        RETURN = 'Return', 'Return'
+
     signed_quantity = models.BigIntegerField(blank=True, null=True)
-    transaction_type = models.TextField(blank=True, null=True)
+    transaction_type = models.TextField(blank=True, null=True, choices=TransactionType.choices)
     created_time = models.DateTimeField(blank=True, null=True)
     quantity = models.BigIntegerField(blank=True, null=True)
     part = models.ForeignKey('Parts', models.DO_NOTHING, blank=True, null=True)
-    
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, models.DO_NOTHING,
+        db_column='created_by_id', blank=True, null=True,
+        related_name='inventory_transactions',
+    )
+    source_reference = models.CharField(max_length=255, blank=True, null=True)
+
     def __str__(self):
         return f"{self.part}-{self.transaction_type}{self.signed_quantity}"
 

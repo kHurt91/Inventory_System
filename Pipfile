@@ -5,6 +5,10 @@ name = "pypi"
 
 [packages]
 mysqlclient = "*"
+djangorestframework = "*"
+django-environ = "*"
+django-filter = "*"
+djangorestframework-simplejwt = "*"
 
 [dev-packages]
 
