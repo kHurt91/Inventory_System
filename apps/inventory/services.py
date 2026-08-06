@@ -44,7 +44,10 @@ def record_transaction(*, part, transaction_type, quantity, created_by=None, sou
                     f"Applying this transaction would take Part {part.pk} on_hand "
                     f"from {locked_part.on_hand or 0} to {new_on_hand}."
                 )
-            Parts.objects.filter(pk=part.pk).update(on_hand=F('on_hand') + signed_quantity)
+            update_fields = {'on_hand': F('on_hand') + signed_quantity}
+            if locked_part.reorder_point is not None:
+                update_fields['needs_reorder'] = int(new_on_hand <= locked_part.reorder_point)
+            Parts.objects.filter(pk=part.pk).update(**update_fields)
 
         return InventoryTransactions.objects.create(
             part=part,

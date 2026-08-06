@@ -1,0 +1,10 @@
+.git
+.env
+*.sql
+*.pyc
+__pycache__/
+.venv/
+venv/
+django_dev.log
+*.md
+.pytest_cache/

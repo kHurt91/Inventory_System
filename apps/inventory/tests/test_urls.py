@@ -5,6 +5,9 @@ from apps.inventory.views import (
     EquipmentListViewSet,
     InventoryTransactionViewSet,
     PartsViewSet,
+    PurchaseOrderLineViewSet,
+    PurchaseOrderViewSet,
+    RepairHistoryViewSet,
     SupplierViewSet,
 )
 
@@ -35,3 +38,27 @@ class UrlResolutionTests(SimpleTestCase):
     def test_suppliers_list_resolves_to_viewset(self):
         match = resolve('/api/suppliers/')
         self.assertIs(match.func.cls, SupplierViewSet)
+
+    def test_repair_history_list_resolves_to_viewset(self):
+        match = resolve('/api/repair-history/')
+        self.assertIs(match.func.cls, RepairHistoryViewSet)
+
+    def test_purchase_orders_list_resolves_to_viewset(self):
+        match = resolve('/api/purchase-orders/')
+        self.assertIs(match.func.cls, PurchaseOrderViewSet)
+
+    def test_purchase_order_lines_list_resolves_to_viewset(self):
+        match = resolve('/api/purchase-order-lines/')
+        self.assertIs(match.func.cls, PurchaseOrderLineViewSet)
+
+    def test_purchase_order_submit_action_resolves(self):
+        match = resolve('/api/purchase-orders/1/submit/')
+        self.assertIs(match.func.cls, PurchaseOrderViewSet)
+
+    def test_purchase_order_receive_action_resolves(self):
+        match = resolve('/api/purchase-orders/1/receive/')
+        self.assertIs(match.func.cls, PurchaseOrderViewSet)
+
+    def test_parts_lookup_action_resolves(self):
+        match = resolve('/api/parts/lookup/')
+        self.assertIs(match.func.cls, PartsViewSet)

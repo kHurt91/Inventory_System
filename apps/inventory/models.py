@@ -184,7 +184,7 @@ class InventoryTransactions(models.Model):
 
     signed_quantity = models.BigIntegerField(blank=True, null=True)
     transaction_type = models.TextField(blank=True, null=True, choices=TransactionType.choices)
-    created_time = models.DateTimeField(blank=True, null=True)
+    created_time = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     quantity = models.BigIntegerField(blank=True, null=True)
     part = models.ForeignKey('Parts', models.DO_NOTHING, blank=True, null=True)
     created_by = models.ForeignKey(
@@ -245,12 +245,19 @@ class Parts(models.Model):
     part_id = models.AutoField(primary_key=True)
     record_id = models.IntegerField(blank=True, null=True)
     needs_reorder = models.IntegerField(blank=True, null=True)
+    reorder_point = models.IntegerField(blank=True, null=True)
+    reorder_quantity = models.IntegerField(blank=True, null=True)
     manufacturer = models.TextField(blank=True, null=True)
     supplier = models.ForeignKey('Suppliers', models.DO_NOTHING, blank=True, null=True, related_name='supplied_parts')
     alternate_supplier = models.TextField(blank=True, null=True)
     cost_notes = models.TextField(blank=True, null=True)
     brand_model = models.TextField(blank=True, null=True)
     part_name = models.TextField(blank=True, null=True)
+    # Not declared unique=True: a real unique index exists at the DB level, but marking
+    # it unique here would make DRF auto-attach a UniqueValidator that queries this
+    # (unmanaged, test-DB-absent) table during serializer validation -- breaking the
+    # SimpleTestCase-based tests this app relies on for every other Parts field.
+    barcode = models.CharField(max_length=64, blank=True, null=True)
     status = models.TextField(blank=True, null=True)
     
     def __str__(self):
@@ -325,6 +332,54 @@ class PurchaseOrderHistory(models.Model):
         db_table = 'purchase_order_history'
 
 
+class PurchaseOrder(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = 'Draft', 'Draft'
+        SUBMITTED = 'Submitted', 'Submitted'
+        RECEIVED = 'Received', 'Received'
+        CLOSED = 'Closed', 'Closed'
+
+    # db_constraint=False: Suppliers is an unmanaged legacy table (no Django migration
+    # creates it), so a real DB-level FK constraint would break test-database creation
+    # and any environment where the legacy schema isn't already provisioned.
+    supplier = models.ForeignKey(
+        'Suppliers', on_delete=models.PROTECT, related_name='purchase_orders', db_constraint=False,
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='purchase_orders_created',
+    )
+    auto_generated = models.BooleanField(default=False)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"PO #{self.pk} ({self.status}) - {self.supplier}"
+
+    class Meta:
+        db_table = 'purchase_order'
+        ordering = ['-created_at']
+
+
+class PurchaseOrderLine(models.Model):
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='lines')
+    part = models.ForeignKey(
+        'Parts', on_delete=models.PROTECT, related_name='purchase_order_lines', db_constraint=False,
+    )
+    quantity_ordered = models.PositiveIntegerField()
+    quantity_received = models.PositiveIntegerField(default=0)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.part} x{self.quantity_ordered} (PO #{self.purchase_order_id})"
+
+    class Meta:
+        db_table = 'purchase_order_line'
+
+
 class RepairHistory(models.Model):
     date_needed = models.DateField(blank=True, null=True)
     date_issued = models.DateField(blank=True, null=True)
@@ -369,6 +424,7 @@ class SageHistory(models.Model):
 
 
 class Suppliers(models.Model):
+    id = models.AutoField(primary_key=True)
     supplier_name = models.TextField(blank=True, null=True)
     phone_number = models.TextField(blank=True, null=True)
     contacts = models.TextField(blank=True, null=True)

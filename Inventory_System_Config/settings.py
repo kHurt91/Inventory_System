@@ -35,6 +35,14 @@ DEBUG = env('DEBUG')
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=['http://localhost:5173'])
+
+EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='inventory-system@localhost')
+REORDER_ALERT_RECIPIENTS = env.list('REORDER_ALERT_RECIPIENTS', default=[])
+
+REDIS_URL = env('REDIS_URL', default='redis://localhost:6379/0')
+
 
 # Application definition
 
@@ -48,10 +56,13 @@ INSTALLED_APPS = [
     'apps.inventory',
     'rest_framework',
     'django_filters',
+    'corsheaders',
+    'django_celery_beat',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -167,4 +178,58 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': False,
     'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+# Cache
+# https://docs.djangoproject.com/en/5.2/topics/cache/#redis
+# Uses Django's built-in Redis backend (no third-party cache package needed).
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': REDIS_URL,
+    }
+}
+
+# Celery
+# https://docs.celeryq.dev/en/stable/django/first-steps-with-django.html
+# django-celery-beat stores the periodic-task schedule in the DB (editable from
+# admin) rather than a static celerybeat-schedule file, so ops can change the
+# reorder-scan cadence without a deploy.
+
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=REDIS_URL)
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default=REDIS_URL)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+
+# Logging
+# Structured (JSON) logs to stdout -- the format containers/log aggregators
+# (Docker, CloudWatch, etc.) expect, versus Django's human-oriented default.
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'json': {
+            '()': 'Inventory_System_Config.logging_utils.JsonFormatter',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'json',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': env('DJANGO_LOG_LEVEL', default='INFO'),
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
 }
