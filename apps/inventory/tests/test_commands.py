@@ -17,18 +17,15 @@ def _mock_part(pk, on_hand, reorder_point, needs_reorder, supplier_id=10, reorde
 class ScanReorderAlertsCommandTests(TestCase):
     def _run(self, parts, drafted_orders=None):
         """
-        Parts.objects.filter() is called twice for different purposes in the command:
-        once to fetch all parts with a reorder_point set, and once per part to persist
-        an updated needs_reorder flag. A flat return_value can't distinguish those calls
-        (the second would return the same list, which has no .update()), so route by
-        call signature and hand back a fresh per-pk mock for the update calls.
+        The command fetches all parts via Parts.objects.all(), then persists an
+        updated needs_reorder flag per-part via Parts.objects.filter(pk=X).update(...).
+        Route those two calls separately and hand back a fresh per-pk mock for the
+        update calls so assertions can inspect what each part was updated with.
         """
         out = io.StringIO()
         update_mocks = {}
 
         def filter_side_effect(**kwargs):
-            if 'reorder_point__isnull' in kwargs:
-                return parts
             update_mock = Mock()
             update_mocks[kwargs['pk']] = update_mock
             return update_mock
@@ -42,6 +39,7 @@ class ScanReorderAlertsCommandTests(TestCase):
                 mock.patch(
                     'apps.inventory.management.commands.scan_reorder_alerts.send_mail'
                 ) as mock_send_mail:
+            MockParts.objects.all.return_value = parts
             MockParts.objects.filter.side_effect = filter_side_effect
             call_command('scan_reorder_alerts', stdout=out)
         return out.getvalue(), update_mocks, mock_draft, mock_send_mail
@@ -68,6 +66,22 @@ class ScanReorderAlertsCommandTests(TestCase):
         self.assertIn('0 newly flagged', output)
         mock_draft.assert_not_called()
 
+    def test_part_without_reorder_point_flagged_when_out_of_stock(self):
+        part = _mock_part(pk=1, on_hand=0, reorder_point=None, needs_reorder=0)
+        output, update_mocks, mock_draft, _ = self._run([part])
+
+        self.assertIn('1 newly flagged', output)
+        update_mocks[1].update.assert_called_once_with(needs_reorder=1)
+        mock_draft.assert_called_once_with([part])
+
+    def test_part_without_reorder_point_stays_unflagged_while_in_stock(self):
+        part = _mock_part(pk=1, on_hand=3, reorder_point=None, needs_reorder=0)
+        output, update_mocks, mock_draft, _ = self._run([part])
+
+        self.assertIn('0 newly flagged', output)
+        self.assertNotIn(1, update_mocks)
+        mock_draft.assert_not_called()
+
     @override_settings(REORDER_ALERT_RECIPIENTS=['owner@example.com'])
     def test_sends_email_digest_when_recipients_configured(self):
         part = _mock_part(pk=1, on_hand=2, reorder_point=5, needs_reorder=0)
@@ -87,7 +101,7 @@ class ScanReorderAlertsCommandTests(TestCase):
         mock_send_mail.assert_not_called()
         self.assertIn('no email sent', output)
 
-    def test_no_parts_with_reorder_point_is_a_no_op(self):
+    def test_no_parts_is_a_no_op(self):
         output, _, mock_draft, mock_send_mail = self._run([])
 
         self.assertIn('Scanned 0 part(s)', output)

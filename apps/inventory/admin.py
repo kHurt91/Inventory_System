@@ -5,6 +5,7 @@ from apps.inventory.models import models
 
 from django.contrib import admin
 from . import models
+from .services import compute_needs_reorder
 
 
 # ---- reusable read-only base for pipeline/history tables ----
@@ -29,6 +30,13 @@ class PartsAdmin(admin.ModelAdmin):
     search_fields = ("part_name", "part_description", "brand_model", "manufacturer", "barcode")
     autocomplete_fields = ("supplier",)          # FK dropdown -> searchable
     readonly_fields = ("needs_reorder",)         # derived by record_transaction()/scan_reorder_alerts
+
+    def save_model(self, request, obj, form, change):
+        # on_hand/reorder_point can be edited directly here, bypassing
+        # record_transaction() entirely -- recompute needs_reorder on every
+        # save so it doesn't go stale until the next scan_reorder_alerts run.
+        obj.needs_reorder = int(compute_needs_reorder(obj.on_hand, obj.reorder_point))
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(models.Suppliers)

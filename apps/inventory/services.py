@@ -26,6 +26,19 @@ def compute_signed_quantity(transaction_type, quantity):
     return sign * abs(quantity)
 
 
+def compute_needs_reorder(on_hand, reorder_point):
+    """
+    Single source of truth for the needs_reorder derivation, shared by
+    record_transaction(), the scan_reorder_alerts command, and PartsAdmin --
+    every place Parts.on_hand or Parts.reorder_point can change. Threshold-based
+    if a reorder_point is configured, otherwise falls back to "out of stock".
+    """
+    on_hand = on_hand or 0
+    if reorder_point is not None:
+        return on_hand <= reorder_point
+    return on_hand <= 0
+
+
 def record_transaction(*, part, transaction_type, quantity, created_by=None, source_reference=None):
     """
     Create an InventoryTransactions row and, if `part` is set, atomically apply
@@ -44,9 +57,10 @@ def record_transaction(*, part, transaction_type, quantity, created_by=None, sou
                     f"Applying this transaction would take Part {part.pk} on_hand "
                     f"from {locked_part.on_hand or 0} to {new_on_hand}."
                 )
-            update_fields = {'on_hand': F('on_hand') + signed_quantity}
-            if locked_part.reorder_point is not None:
-                update_fields['needs_reorder'] = int(new_on_hand <= locked_part.reorder_point)
+            update_fields = {
+                'on_hand': F('on_hand') + signed_quantity,
+                'needs_reorder': int(compute_needs_reorder(new_on_hand, locked_part.reorder_point)),
+            }
             Parts.objects.filter(pk=part.pk).update(**update_fields)
 
         return InventoryTransactions.objects.create(

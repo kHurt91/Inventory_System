@@ -157,10 +157,25 @@ class PurchaseOrderLineViewSet(viewsets.ModelViewSet):
     filterset_fields = ['purchase_order', 'part']
     ordering_fields = ['id']
 
+    def _check_part_matches_supplier(self, purchase_order, part):
+        if part.supplier_id != purchase_order.supplier_id:
+            raise ValidationError(
+                f"Part {part.pk} ({part.part_description}) is not supplied by "
+                f"{purchase_order.supplier.supplier_name}, so it can't be added to this purchase order."
+            )
+
     def perform_create(self, serializer):
         purchase_order = serializer.validated_data['purchase_order']
+        part = serializer.validated_data['part']
         if purchase_order.status != PurchaseOrder.Status.DRAFT:
             raise ValidationError('Cannot add line items to a purchase order that is not in Draft status.')
+        self._check_part_matches_supplier(purchase_order, part)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        purchase_order = serializer.validated_data.get('purchase_order', serializer.instance.purchase_order)
+        part = serializer.validated_data.get('part', serializer.instance.part)
+        self._check_part_matches_supplier(purchase_order, part)
         serializer.save()
 
 

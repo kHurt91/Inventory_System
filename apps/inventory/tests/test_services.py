@@ -6,6 +6,7 @@ from django.test import TestCase
 from apps.inventory.models import InventoryTransactions
 from apps.inventory.services import (
     InsufficientStockError,
+    compute_needs_reorder,
     compute_signed_quantity,
     record_transaction,
 )
@@ -31,6 +32,25 @@ class ComputeSignedQuantityTests(TestCase):
 
     def test_unknown_transaction_type_yields_none(self):
         self.assertIsNone(compute_signed_quantity('BOGUS', 5))
+
+
+class ComputeNeedsReorderTests(TestCase):
+    def test_at_or_below_reorder_point_is_true(self):
+        self.assertTrue(compute_needs_reorder(on_hand=5, reorder_point=5))
+        self.assertTrue(compute_needs_reorder(on_hand=4, reorder_point=5))
+
+    def test_above_reorder_point_is_false(self):
+        self.assertFalse(compute_needs_reorder(on_hand=6, reorder_point=5))
+
+    def test_out_of_stock_fallback_when_reorder_point_unset(self):
+        self.assertTrue(compute_needs_reorder(on_hand=0, reorder_point=None))
+
+    def test_in_stock_fallback_when_reorder_point_unset(self):
+        self.assertFalse(compute_needs_reorder(on_hand=1, reorder_point=None))
+
+    def test_none_on_hand_treated_as_zero(self):
+        self.assertTrue(compute_needs_reorder(on_hand=None, reorder_point=None))
+        self.assertFalse(compute_needs_reorder(on_hand=None, reorder_point=-1))
 
 
 class RecordTransactionTests(TestCase):
@@ -96,7 +116,9 @@ class RecordTransactionTests(TestCase):
             _, kwargs = MockParts.objects.filter.return_value.update.call_args
             self.assertEqual(kwargs['needs_reorder'], 0)
 
-    def test_needs_reorder_omitted_when_reorder_point_unset(self):
+    def test_needs_reorder_defaults_unset_without_reorder_point(self):
+        # No reorder_point configured: falls back to "out of stock", so staying
+        # above zero should keep needs_reorder unset (0), not leave it untouched.
         part = self._mock_part(on_hand=10, reorder_point=None)
         with mock.patch('apps.inventory.services.Parts') as MockParts, \
                 mock.patch('apps.inventory.services.InventoryTransactions'):
@@ -105,7 +127,18 @@ class RecordTransactionTests(TestCase):
             record_transaction(part=part, transaction_type=TT.ISSUE, quantity=1, created_by=None)
 
             _, kwargs = MockParts.objects.filter.return_value.update.call_args
-            self.assertNotIn('needs_reorder', kwargs)
+            self.assertEqual(kwargs['needs_reorder'], 0)
+
+    def test_needs_reorder_set_when_on_hand_hits_zero_without_reorder_point(self):
+        part = self._mock_part(on_hand=5, reorder_point=None)
+        with mock.patch('apps.inventory.services.Parts') as MockParts, \
+                mock.patch('apps.inventory.services.InventoryTransactions'):
+            MockParts.objects.select_for_update.return_value.get.return_value = part
+
+            record_transaction(part=part, transaction_type=TT.ISSUE, quantity=5, created_by=None)
+
+            _, kwargs = MockParts.objects.filter.return_value.update.call_args
+            self.assertEqual(kwargs['needs_reorder'], 1)
 
     def test_empty_source_reference_is_stored_as_none(self):
         part = self._mock_part(on_hand=10)
